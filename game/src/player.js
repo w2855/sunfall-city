@@ -1,67 +1,64 @@
-// Sunfall City — the on-foot avatar, player state and the walking model.
+// The player: a low-poly avatar, the state bag, and walking around the city.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 import { resolveBox } from './vehicles.js';
+import { groundHeight } from './world.js';
 
-const jacketMat = new THREE.MeshLambertMaterial({ color: 0xd1495b });
-const skinMat = new THREE.MeshLambertMaterial({ color: 0xe0ac69 });
-const capMat = new THREE.MeshLambertMaterial({ color: 0x232742 });
-const pantsMat = new THREE.MeshLambertMaterial({ color: 0x2e3444 });
-const gunMat = new THREE.MeshLambertMaterial({ color: 0x1d2029 });
+const jacketMat = new THREE.MeshLambertMaterial({ color: 0xd7263d });
+const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
+const capMat = new THREE.MeshLambertMaterial({ color: 0x1d1f2a });
+const darkMat = new THREE.MeshLambertMaterial({ color: 0x23233a });
+const gunMat = new THREE.MeshLambertMaterial({ color: 0x2a2d38 });
 
+// A low-poly person. Limbs pivot at their tops; the gun rides the right arm.
 export function makeAvatar() {
-  const g = new THREE.Group();
+  const group = new THREE.Group();
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.28), jacketMat);
-  torso.position.y = 1.06;
-  g.add(torso);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), jacketMat);
+  torso.position.y = 1.12;
+  group.add(torso);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), skinMat);
-  head.position.y = 1.57;
-  g.add(head);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), skinMat);
+  head.position.y = 1.72;
+  group.add(head);
 
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.34), capMat);
-  cap.position.set(0, 1.72, -0.02);
-  g.add(cap);
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.14), capMat);
-  brim.position.set(0, 1.68, 0.2);
-  g.add(brim);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.38), capMat);
+  cap.position.y = 1.92;
+  group.add(cap);
 
-  const limb = (w, h, dd, mat, px, py) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(px, py, 0);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), mat);
-    mesh.position.y = -h / 2;
-    pivot.add(mesh);
-    g.add(pivot);
-    return pivot;
-  };
-  const legL = limb(0.17, 0.78, 0.19, pantsMat, -0.12, 0.76);
-  const legR = limb(0.17, 0.78, 0.19, pantsMat, 0.12, 0.76);
-  const armL = limb(0.13, 0.6, 0.15, jacketMat, -0.31, 1.32);
-  const armR = limb(0.13, 0.6, 0.15, jacketMat, 0.31, 1.32);
+  const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.22);
+  legGeo.translate(0, -0.36, 0); // pivot at the hip
+  const legL = new THREE.Mesh(legGeo, darkMat);
+  legL.position.set(-0.16, 0.76, 0);
+  const legR = new THREE.Mesh(legGeo, darkMat);
+  legR.position.set(0.16, 0.76, 0);
+  group.add(legL, legR);
+
+  const armGeo = new THREE.BoxGeometry(0.17, 0.62, 0.19);
+  armGeo.translate(0, -0.31, 0); // pivot at the shoulder
+  const armL = new THREE.Mesh(armGeo, jacketMat);
+  armL.position.set(-0.42, 1.42, 0);
+  const armR = new THREE.Mesh(armGeo, jacketMat);
+  armR.position.set(0.42, 1.42, 0);
+  group.add(armL, armR);
 
   const gun = new THREE.Group();
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.07), gunMat);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.24), gunMat);
-  barrel.position.set(0, 0.05, 0.1);
-  gun.add(grip, barrel);
-  gun.position.set(0, -0.62, 0.1);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.34), gunMat);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.1), gunMat);
+  grip.position.set(0, -0.12, 0.06);
+  gun.add(barrel, grip);
+  gun.position.set(0, -0.58, 0.12);
   gun.visible = false;
   armR.add(gun);
 
-  g.userData.legL = legL;
-  g.userData.legR = legR;
-  g.userData.armL = armL;
-  g.userData.armR = armR;
-  g.userData.gun = gun;
-  return g;
+  group.userData = { legL, legR, armL, armR, gun };
+  return group;
 }
 
 export function createPlayerState(spawn) {
   return {
-    pos: spawn.clone(),
-    heading: Math.PI,
+    pos: new THREE.Vector3(spawn.x, 0, spawn.z),
+    heading: spawn.heading ?? 0,
     onFoot: true,
     car: null,
     health: 100,
@@ -75,54 +72,66 @@ export function createPlayerState(spawn) {
   };
 }
 
+// One walking step: WASD relative to the camera bearing, resolved out of buildings.
 export function stepOnFoot(state, avatar, input, dt, colliders, cameraBearing) {
-  const C = CONFIG.player;
-  const fx = Math.sin(cameraBearing);
-  const fz = Math.cos(cameraBearing);
-  const rx = Math.cos(cameraBearing);
-  const rz = -Math.sin(cameraBearing);
-  const f = (input.has('KeyW') ? 1 : 0) - (input.has('KeyS') ? 1 : 0);
-  const s = (input.has('KeyD') ? 1 : 0) - (input.has('KeyA') ? 1 : 0);
-  const sprint = input.has('ShiftLeft') || input.has('ShiftRight');
-  const speed = sprint ? C.runSpeed : C.walkSpeed;
+  const mz = input.moveZ || 0; // forward/back
+  const mx = input.moveX || 0; // right/left
+  let dx = 0;
+  let dz = 0;
+  let speed = 0;
 
-  let mx = fx * f + rx * s;
-  let mz = fz * f + rz * s;
-  const len = Math.hypot(mx, mz);
-  if (len > 0.001) {
-    mx = (mx / len) * speed * dt;
-    mz = (mz / len) * speed * dt;
-    const res = resolveBox(state.pos.x, state.pos.z, state.pos.x + mx, state.pos.z + mz, colliders, C.radius);
-    state.pos.x = res.x;
-    state.pos.z = res.z;
-    state.heading = Math.atan2(mx, mz);
-    state.walkPhase += Math.hypot(mx, mz) * 2.3;
+  if (mx !== 0 || mz !== 0) {
+    const sinB = Math.sin(cameraBearing);
+    const cosB = Math.cos(cameraBearing);
+    // forward = (sinB, cosB); right = (-cosB, sinB)
+    dx = sinB * mz - cosB * mx;
+    dz = cosB * mz + sinB * mx;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.001) {
+      dx /= len;
+      dz /= len;
+      speed = (input.sprint && state.onFoot ? CONFIG.player.runSpeed : CONFIG.player.walkSpeed) * (input.immobilized ? 0 : 1);
+    }
   }
 
-  avatar.position.set(state.pos.x, 0, state.pos.z);
+  const nx = state.pos.x + dx * speed * dt;
+  const nz = state.pos.z + dz * speed * dt;
+  const res = resolveBox(state.pos.x, state.pos.z, nx, nz, colliders, CONFIG.player.radius);
+  state.pos.x = res.x;
+  state.pos.z = res.z;
+  state.pos.y = groundHeight(res.x, res.z);
+
+  if (speed > 0) {
+    state.heading = Math.atan2(dx, dz);
+    state.walkPhase += speed * dt * 2.4;
+  }
+
+  // Pose the avatar: position, heading, swinging limbs, the gun arm.
+  avatar.position.set(state.pos.x, state.pos.y, state.pos.z);
   avatar.rotation.y = state.heading;
-
-  const swing = len > 0.001 ? Math.sin(state.walkPhase) * 0.55 : 0;
-  const u = avatar.userData;
-  u.legL.rotation.x = swing;
-  u.legR.rotation.x = -swing;
-  u.armL.rotation.x = -swing * 0.7;
+  const { legL, legR, armL, armR, gun } = avatar.userData;
+  const swing = Math.sin(state.walkPhase) * 0.62;
+  legL.rotation.x = swing;
+  legR.rotation.x = -swing;
+  armL.rotation.x = -swing * 0.8;
   if (state.armed) {
-    u.armR.rotation.x = -Math.PI / 2;
-    u.gun.visible = true;
+    armR.rotation.x = -Math.PI / 2; // pistol raised
   } else {
-    u.armR.rotation.x = swing * 0.7;
-    u.gun.visible = false;
+    armR.rotation.x = swing * 0.8;
   }
+  gun.visible = state.armed;
 }
 
+// The closest car within reach of the player, for entering and exiting.
 export function nearestCar(state, cars, reach) {
   let best = null;
-  let bestDist = reach;
+  let bestD = reach;
   for (const car of cars) {
-    const dist = Math.hypot(car.position.x - state.pos.x, car.position.z - state.pos.z);
-    if (dist < bestDist) {
-      bestDist = dist;
+    const dx = car.position.x - state.pos.x;
+    const dz = car.position.z - state.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD) {
+      bestD = d;
       best = car;
     }
   }

@@ -1,204 +1,250 @@
-// Sunfall City — procedural city: roads, blocks, towers, windows, neon, lamps, palms, beach.
-// A seeded LCG drives every choice so the same city builds on every run.
+// Builds Sunfall City itself: the road grid, the blocks, the towers, the neon, the beach.
+// A seeded LCG drives every choice, so the same city builds on every run.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
-/** Mutable network the rest of the game reads: road line coordinates, building colliders, street props. */
+const { blocks, block, road } = CONFIG.city;
+const half = (blocks * block) / 2;                    // outer road centres sit at +-half
+export const CITY_EDGE = half + block / 2 + road / 2; // the outer rim of the city
+const SLAB = block - road;                            // a block's buildable width
+export const CITY_HALF = half;
+
+// Mutable world records: minimap road lines, physics boxes, street furniture.
 export const network = { lines: [], colliders: [], props: [] };
 
-/** Deterministic LCG random: same seed, same city, every run. */
-function makeRandom(seed) {
+// Raised sidewalk rectangles, for groundHeight().
+const slabs = [];
+
+const NEON = [0xef476f, 0x06d6a0, 0x118ab2, 0xffd166, 0xf78c6b];
+
+function makeRng(seed) {
   let s = seed >>> 0;
-  return function () {
+  return () => {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     return s / 4294967296;
   };
 }
 
-export function buildCity(scene) {
-  const { blocks, block, road } = CONFIG.city;
-  const half = (blocks * block) / 2;
-  const colors = CONFIG.colors;
-  const rand = makeRandom(31337);
+// Shared materials and geometries, built once.
+let shared = null;
+function sharedAssets() {
+  if (shared) return shared;
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const ring = new THREE.CircleGeometry(1, 20);
+  ring.rotateX(-Math.PI / 2);
+  shared = {
+    box,
+    ring,
+    road: new THREE.MeshLambertMaterial({ color: CONFIG.colors.road }),
+    dash: new THREE.MeshBasicMaterial({ color: 0xc4c9d6 }),
+    walk: new THREE.MeshLambertMaterial({ color: CONFIG.colors.sidewalk }),
+    ground: new THREE.MeshLambertMaterial({ color: 0x14111f }),
+    sand: new THREE.MeshLambertMaterial({ color: 0xd6bd85 }),
+    windowLit: new THREE.MeshBasicMaterial({ color: CONFIG.colors.windowLit, transparent: true, opacity: 0.55 }),
+    lampPost: new THREE.MeshLambertMaterial({ color: 0x23283a }),
+    bulb: new THREE.MeshBasicMaterial({ color: 0xffe6b0 }),
+    pool: new THREE.MeshBasicMaterial({ color: CONFIG.colors.windowLit, transparent: true, opacity: 0.13, depthWrite: false }),
+    palm: new THREE.MeshLambertMaterial({ color: CONFIG.colors.palm }),
+    trunk: new THREE.MeshLambertMaterial({ color: CONFIG.colors.trunk }),
+  };
+  return shared;
+}
 
+export function buildCity(scene) {
   network.lines.length = 0;
   network.colliders.length = 0;
   network.props.length = 0;
+  slabs.length = 0;
+  const S = sharedAssets();
+  const rng = makeRng(0x51fa11);
+  const span = half * 2 + road;
 
-  const lines = [];
-  for (let i = 0; i <= blocks; i++) lines.push(-half + i * block);
-  for (const L of lines) network.lines.push(L);
-
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(half * 2 + 420, half * 2 + 420),
-    new THREE.MeshLambertMaterial({ color: 0x120f20 })
-  );
+  // Dark ground far beyond the city; the beach takes the far south.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), S.ground);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.08;
+  ground.position.y = -0.05;
   scene.add(ground);
 
-  const beach = new THREE.Mesh(
-    new THREE.PlaneGeometry(half * 2 + 420, 44),
-    new THREE.MeshLambertMaterial({ color: 0xd9c08c })
-  );
+  const beach = new THREE.Mesh(new THREE.PlaneGeometry(1600, 130), S.sand);
   beach.rotation.x = -Math.PI / 2;
-  beach.position.set(0, -0.04, half + 26);
+  beach.position.set(0, 0.02, half + road / 2 + 65);
   scene.add(beach);
 
-  const roadMat = new THREE.MeshLambertMaterial({ color: colors.road });
-  for (const L of lines) {
-    const horiz = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + road, road), roadMat);
-    horiz.rotation.x = -Math.PI / 2;
-    horiz.position.set(0, 0.02, L);
-    scene.add(horiz);
-    const vert = new THREE.Mesh(new THREE.PlaneGeometry(road, half * 2 + road), roadMat);
-    vert.rotation.x = -Math.PI / 2;
-    vert.position.set(L, 0.02, 0);
-    scene.add(vert);
+  // The road grid: one horizontal and one vertical plane per grid line, plus lane dashes.
+  for (let i = 0; i <= blocks; i++) {
+    const pos = -half + i * block;
+
+    const hRoad = new THREE.Mesh(new THREE.PlaneGeometry(span, road), S.road);
+    hRoad.rotation.x = -Math.PI / 2;
+    hRoad.position.set(0, 0.01, pos);
+    scene.add(hRoad);
+
+    const vRoad = new THREE.Mesh(new THREE.PlaneGeometry(road, span), S.road);
+    vRoad.rotation.x = -Math.PI / 2;
+    vRoad.position.set(pos, 0.02, 0);
+    scene.add(vRoad);
+
+    for (let d = -half; d <= half; d += 8) {
+      const hDash = new THREE.Mesh(S.box, S.dash);
+      hDash.scale.set(2.6, 0.02, 0.34);
+      hDash.position.set(d, 0.05, pos);
+      scene.add(hDash);
+      const vDash = new THREE.Mesh(S.box, S.dash);
+      vDash.scale.set(0.34, 0.02, 2.6);
+      vDash.position.set(pos, 0.05, d);
+      scene.add(vDash);
+    }
+
+    network.lines.push({ axis: 'h', pos }, { axis: 'v', pos });
   }
 
-  const dashGeo = new THREE.PlaneGeometry(2.6, 0.35);
-  const dashMat = new THREE.MeshBasicMaterial({ color: 0xd6d9e4 });
-  const dashCapacity = lines.length * 2 * Math.ceil((half * 2 + road) / 8);
-  const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashCapacity);
-  const m4 = new THREE.Matrix4();
-  const rotFlat = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-  const rotSide = new THREE.Matrix4().makeRotationY(Math.PI / 2);
-  let di = 0;
-  for (const L of lines) {
-    for (let t = -half - road / 2 + 4; t <= half + road / 2; t += 8) {
-      m4.copy(rotFlat).setPosition(t, 0.045, L);
-      dashes.setMatrixAt(di++, m4);
-      m4.copy(rotSide).multiply(rotFlat).setPosition(L, 0.045, t);
-      dashes.setMatrixAt(di++, m4);
+  // A tower with its window strips, and maybe a neon sign.
+  function addTower(scene_, cx, cz, color) {
+    const w = 16 + rng() * 10;
+    const d = 16 + rng() * 10;
+    const h = 10 + rng() * 54;
+    const base = 0.3; // the sidewalk slab's top
+
+    const tower = new THREE.Mesh(S.box, new THREE.MeshLambertMaterial({ color }));
+    tower.scale.set(w, h, d);
+    tower.position.set(cx, base + h / 2, cz);
+    scene_.add(tower);
+
+    network.colliders.push({ x: cx, z: cz, w, d, h });
+
+    // One lit strip per 4-metre floor, skipping half of them at random.
+    const floors = Math.max(1, Math.floor(h / 4) - 1);
+    for (let f = 0; f < floors; f++) {
+      if (rng() < 0.5) continue;
+      const strip = new THREE.Mesh(S.box, S.windowLit);
+      strip.scale.set(w + 0.14, 0.55, d + 0.14);
+      strip.position.set(cx, base + 2.4 + f * 4, cz);
+      scene_.add(strip);
+    }
+
+    // Half of the tall towers get a glowing neon panel on their street-facing side,
+    // and a painted circle of the same colour on the ground below it. No PointLight.
+    if (h >= 34 && rng() < 0.5) {
+      const color3 = NEON[(rng() * NEON.length) | 0];
+      const mat = new THREE.MeshBasicMaterial({ color: color3 });
+      const panel = new THREE.Mesh(S.box, mat);
+      const y = base + h - 3;
+      const off = rng() * (Math.min(w, d) - 6) - (Math.min(w, d) - 6) / 2;
+      let px, py, pz;
+      if (Math.abs(cx) >= Math.abs(cz)) {
+        px = cx + Math.sign(cx || 1) * (w / 2 + 0.3);
+        py = y;
+        pz = cz + off;
+        panel.scale.set(0.5, 2.4, 6);
+      } else {
+        px = cx + off;
+        py = y;
+        pz = cz + Math.sign(cz || 1) * (d / 2 + 0.3);
+        panel.scale.set(6, 2.4, 0.5);
+      }
+      panel.position.set(px, py, pz);
+      scene_.add(panel);
+
+      const glow = new THREE.Mesh(S.ring, mat);
+      glow.scale.set(3.4, 1, 3.4);
+      glow.position.set(px, groundHeight(px, pz) + 0.04, pz);
+      scene_.add(glow);
     }
   }
-  dashes.count = di;
-  dashes.instanceMatrix.needsUpdate = true;
-  scene.add(dashes);
 
-  const sidewalkMat = new THREE.MeshLambertMaterial({ color: colors.sidewalk });
-  const towerMats = colors.buildings.map((c) => new THREE.MeshLambertMaterial({ color: c }));
-  const windowMat = new THREE.MeshBasicMaterial({ color: colors.windowLit, transparent: true, opacity: 0.55 });
-  const lampMat = new THREE.MeshLambertMaterial({ color: 0x2b2f3d });
-  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe6a8 });
-  const poolMat = new THREE.MeshBasicMaterial({ color: 0xffdf9e, transparent: true, opacity: 0.22 });
-  const palmMat = new THREE.MeshLambertMaterial({ color: colors.palm });
-  const trunkMat = new THREE.MeshLambertMaterial({ color: colors.trunk });
-  const neonPalette = [0xef476f, 0x06d6a0, 0x118ab2, 0xffd166, 0xf78c6b, 0xc77dff];
+  // A street lamp or a palm tree at a block corner.
+  function addCornerProp(scene_, x, z, kind) {
+    if (kind === 'lamp') {
+      const post = new THREE.Mesh(S.box, S.lampPost);
+      post.scale.set(0.16, 5.4, 0.16);
+      post.position.set(x, 2.7 + 0.3, z);
+      scene_.add(post);
+      const arm = new THREE.Mesh(S.box, S.lampPost);
+      arm.scale.set(1.1, 0.12, 0.12);
+      arm.position.set(x + 0.55, 5.9, z);
+      scene_.add(arm);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), S.bulb);
+      bulb.position.set(x + 1.05, 5.82, z);
+      scene_.add(bulb);
+      const pool = new THREE.Mesh(S.ring, S.pool);
+      pool.scale.set(3.6, 1, 3.6);
+      pool.position.set(x + 1.05, groundHeight(x + 1.05, z) + 0.05, z);
+      scene_.add(pool);
+    } else {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.26, 3.8, 7), S.trunk);
+      trunk.position.set(x, 1.9 + 0.3, z);
+      trunk.rotation.z = (rng() - 0.5) * 0.16;
+      scene_.add(trunk);
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.6, 6), S.palm);
+      frond.position.set(x, 4.6 + 0.3, z);
+      scene_.add(frond);
+    }
+    network.props.push({ kind, x, z });
+  }
 
-  const unitBox = new THREE.BoxGeometry(1, 1, 1);
-  const slabGeo = new THREE.BoxGeometry(block - road, 0.3, block - road);
-  const postGeo = new THREE.CylinderGeometry(0.09, 0.13, 5.2, 6);
-  const bulbGeo = new THREE.SphereGeometry(0.3, 10, 8);
-  const poolGeo = new THREE.CircleGeometry(5.2, 20);
-  const neonPoolGeo = new THREE.CircleGeometry(4.5, 22);
-  const trunkGeo = new THREE.CylinderGeometry(0.17, 0.24, 4.6, 6);
-  const frondGeo = new THREE.ConeGeometry(1.9, 1.5, 7);
+  // The blocks: a raised sidewalk slab each, 1-3 towers, props on the four corners.
+  for (let bx = 0; bx < blocks; bx++) {
+    for (let bz = 0; bz < blocks; bz++) {
+      const cx = -half + bx * block + block / 2;
+      const cz = -half + bz * block + block / 2;
+      const r = SLAB / 2;
 
-  for (let i = 0; i < blocks; i++) {
-    for (let j = 0; j < blocks; j++) {
-      const cx = lines[i] + block / 2;
-      const cz = lines[j] + block / 2;
-
-      const slab = new THREE.Mesh(slabGeo, sidewalkMat);
+      const slab = new THREE.Mesh(S.box, S.walk);
+      slab.scale.set(SLAB, 0.3, SLAB);
       slab.position.set(cx, 0.15, cz);
       scene.add(slab);
+      slabs.push({ x: cx, z: cz, r });
 
-      const towerCount = 1 + Math.floor(rand() * 3);
-      const cells = [0, 1, 2, 3].sort(() => rand() - 0.5).slice(0, towerCount);
-      for (const cell of cells) {
-        const ox = (cell % 2 === 0 ? -1 : 1) * 15;
-        const oz = (cell < 2 ? -1 : 1) * 15;
-        const w = 16 + rand() * 8;
-        const d = 16 + rand() * 8;
-        const h = 10 + Math.pow(rand(), 1.4) * 54;
-        const px = cx + ox + (rand() * 2 - 1) * Math.max(0, 12 - w / 2);
-        const pz = cz + oz + (rand() * 2 - 1) * Math.max(0, 12 - d / 2);
-
-        const tower = new THREE.Mesh(unitBox, towerMats[Math.floor(rand() * towerMats.length)]);
-        tower.position.set(px, 0.3 + h / 2, pz);
-        tower.scale.set(w, h, d);
-        scene.add(tower);
-        network.colliders.push({ x: px, z: pz, w, d, h });
-
-        const floors = Math.max(1, Math.floor(h / 4));
-        for (let f = 0; f < floors; f++) {
-          if (rand() < 0.5) continue;
-          const band = new THREE.Mesh(unitBox, windowMat);
-          band.scale.set(w + 0.25, 1.7, d + 0.25);
-          band.position.set(px, 0.3 + f * 4 + 2.4, pz);
-          scene.add(band);
-        }
-
-        if (h >= 34 && rand() < 0.5) {
-          const face = Math.floor(rand() * 4);
-          const nx = [1, -1, 0, 0][face];
-          const nz = [0, 0, 1, -1][face];
-          const neon = neonPalette[Math.floor(rand() * neonPalette.length)];
-          const sign = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial({ color: neon }));
-          const signW = Math.min(w, d) * 0.62;
-          const signY = 0.3 + Math.min(h - 5, 8 + rand() * 14);
-          if (nx !== 0) {
-            sign.scale.set(0.45, 3, signW);
-            sign.position.set(px + nx * (w / 2 + 0.35), signY, pz + (rand() * 2 - 1) * Math.max(0.4, d / 2 - signW / 2 - 0.6));
-          } else {
-            sign.scale.set(signW, 3, 0.45);
-            sign.position.set(px + (rand() * 2 - 1) * Math.max(0.4, w / 2 - signW / 2 - 0.6), signY, pz + nz * (d / 2 + 0.35));
-          }
-          scene.add(sign);
-
-          const glow = new THREE.Mesh(neonPoolGeo, new THREE.MeshBasicMaterial({ color: neon, transparent: true, opacity: 0.42 }));
-          glow.rotation.x = -Math.PI / 2;
-          glow.position.set(cx + nx * 37, 0.035, cz + nz * 37);
-          scene.add(glow);
-
-          network.props.push({ kind: 'neon', x: sign.position.x, z: sign.position.z, color: neon });
-        }
+      const count = 1 + ((rng() * 3) | 0);
+      const slots = [
+        [-13, -13],
+        [13, -13],
+        [0, 13],
+      ];
+      for (let t = 0; t < count; t++) {
+        const jitter = () => (rng() - 0.5) * 8;
+        addTower(scene, cx + slots[t][0] + jitter(), cz + slots[t][1] + jitter(), CONFIG.colors.buildings[(rng() * CONFIG.colors.buildings.length) | 0]);
       }
 
       for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        const lx = cx + sx * 28;
-        const lz = cz + sz * 28;
-        if (rand() < 0.55) {
-          const post = new THREE.Mesh(postGeo, lampMat);
-          post.position.set(lx, 0.3 + 2.6, lz);
-          scene.add(post);
-          const bulb = new THREE.Mesh(bulbGeo, bulbMat);
-          bulb.position.set(lx, 0.3 + 5.2, lz);
-          scene.add(bulb);
-          const pool = new THREE.Mesh(poolGeo, poolMat);
-          pool.rotation.x = -Math.PI / 2;
-          pool.position.set(lx + sx * 5.5, 0.03, lz + sz * 5.5);
-          scene.add(pool);
-          network.props.push({ kind: 'lamp', x: lx, z: lz });
-        } else {
-          const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-          trunk.position.set(lx, 0.3 + 2.3, lz);
-          trunk.rotation.z = (rand() - 0.5) * 0.14;
-          scene.add(trunk);
-          const frond = new THREE.Mesh(frondGeo, palmMat);
-          frond.position.set(lx + (rand() - 0.5) * 0.4, 0.3 + 4.8, lz + (rand() - 0.5) * 0.4);
-          scene.add(frond);
-          network.props.push({ kind: 'palm', x: lx, z: lz });
-        }
+        addCornerProp(scene, cx + sx * (r - 4), cz + sz * (r - 4), rng() < 0.55 ? 'lamp' : 'palm');
       }
     }
   }
 }
 
-export function randomRoadPoint(rand = Math.random) {
-  const { blocks, block } = CONFIG.city;
-  const half = (blocks * block) / 2;
-  const line = -half + Math.floor(rand() * (blocks + 1)) * block;
-  const along = (rand() * 2 - 1) * (half - 10);
-  const lane = (rand() * 2 - 1) * 3.4;
-  if (rand() < 0.5) {
-    return { x: line + lane, z: along, dir: rand() < 0.5 ? 0 : Math.PI };
+// The surface height under a point: 0.3 on a sidewalk slab, 0 on road, ground or beach.
+export function groundHeight(x, z) {
+  for (const s of slabs) {
+    if (Math.abs(x - s.x) < s.r && Math.abs(z - s.z) < s.r) return 0.3;
   }
-  return { x: along, z: line + lane, dir: rand() < 0.5 ? Math.PI / 2 : -Math.PI / 2 };
+  return 0;
 }
 
+// A random spot on a road lane, nose-first heading matching right-hand traffic.
+export function randomRoadPoint(rand = Math.random) {
+  const line = -half + Math.floor(rand() * (blocks + 1)) * block;
+  const along = (rand() * 2 - 1) * (half - 4);
+  const lane = road * 0.25;
+  const eastWest = rand() < 0.5;
+  const forward = rand() < 0.5;
+  if (eastWest) {
+    // driving +x keeps to the +z lane, -x to the -z lane
+    return {
+      x: along,
+      z: line + (forward ? lane : -lane),
+      dir: forward ? Math.PI / 2 : -Math.PI / 2,
+    };
+  }
+  // driving +z keeps to the -x lane, -z to the +x lane
+  return {
+    x: line + (forward ? -lane : lane),
+    z: along,
+    dir: forward ? 0 : Math.PI,
+  };
+}
+
+// Every physics box in the city.
 export function colliders() {
   return network.colliders;
 }

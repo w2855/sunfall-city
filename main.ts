@@ -1,24 +1,23 @@
-// Sunfall City — the hand-in program: copy game/ and screenshots/ into the output
-// directory, then write the make.fun dossier for the entry. Prints one line when done.
-import { buildDossier } from './vendor/makefun-game.ts';
+// Hand-in program for make.fun: copies the entry into the output directory and writes the dossier.
 import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const here = dirname(fileURLToPath(import.meta.url));
+const out = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
-
-const dossier = buildDossier(out, {
-  text_max_bytes: 163840,
-  screenshots: { max: 4, max_bytes: 262144 },
-  game_max_files: 993,
-  game_max_bytes: 50331648,
-  game_path_max_bytes: 1000,
-});
-writeFileSync(join(out, 'dossier.json'), dossier);
-
-console.log(`sunfall-city: game/, screenshots/ and dossier.json written to ${out}`);
+cpSync(resolve(here, 'game'), resolve(out, 'game'), { recursive: true });
+cpSync(resolve(here, 'screenshots'), resolve(out, 'screenshots'), { recursive: true });
+writeFileSync(
+  resolve(out, 'dossier.json'),
+  buildDossier(out, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    game_max_files: 993,
+    game_max_bytes: 50331648,
+    game_path_max_bytes: 1000,
+  }),
+);
+console.log(`sunfall city: packed game/ + screenshots/ + dossier.json into ${out}`);

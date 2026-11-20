@@ -1,151 +1,151 @@
-// Sunfall City — low-poly vehicles and the driving/collision model.
+// Low-poly cars and the arcade driving model shared by the player, traffic and police.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
+import { groundHeight } from './world.js';
 
-const glassMat = new THREE.MeshLambertMaterial({ color: 0x0e1424 });
-const tyreMat = new THREE.MeshLambertMaterial({ color: 0x14151c });
-const headMat = new THREE.MeshBasicMaterial({ color: 0xfff3d0 });
-const tailMat = new THREE.MeshBasicMaterial({ color: 0xff3b30 });
-const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 10);
-wheelGeo.rotateZ(Math.PI / 2); // axle along x so the wheels can roll
-const headGeo = new THREE.BoxGeometry(0.3, 0.14, 0.08);
-const tailGeo = new THREE.BoxGeometry(0.34, 0.12, 0.08);
+const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10);
+wheelGeo.rotateZ(Math.PI / 2); // spin axis along x, so every wheel is oriented to roll
+const wheelMat = new THREE.MeshLambertMaterial({ color: 0x15161c });
+const glassMat = new THREE.MeshLambertMaterial({ color: 0x10141f });
+const headMat = new THREE.MeshBasicMaterial({ color: 0xfff3d6 });
+const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a3c });
+const barBlueMat = new THREE.MeshBasicMaterial({ color: 0x3aa0ff });
+const barRedMat = new THREE.MeshBasicMaterial({ color: 0xff3b4e });
 
+// The car's nose faces local +z; drive.heading rotates that into the world.
 export function makeCar(color, kind = 'sedan') {
-  const car = new THREE.Group();
   const van = kind === 'van';
-  const length = van ? 5.8 : 4.6;
-  const width = van ? 2.2 : 2.0;
-  const bodyMat = new THREE.MeshLambertMaterial({ color });
+  const length = van ? 5.6 : 4.6;
+  const width = van ? 2.4 : 2.15;
+  const group = new THREE.Group();
+  const paint = new THREE.MeshLambertMaterial({ color });
 
-  const bodyH = van ? 0.72 : 0.55;
-  const bodyY = van ? 0.62 : 0.52;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(width, bodyH, length), bodyMat);
-  body.position.y = bodyY;
-  car.add(body);
-  const bodyTop = bodyY + bodyH / 2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width, 0.55, length), paint);
+  body.position.y = 0.55;
+  group.add(body);
 
-  const cabinH = van ? 0.95 : 0.52;
-  const cabinL = van ? 3.4 : 2.3;
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(width - 0.24, cabinH, cabinL), glassMat);
-  cabin.position.set(0, bodyTop + cabinH / 2, van ? -0.3 : -0.15);
-  car.add(cabin);
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(width * 0.86, van ? 0.85 : 0.6, van ? 3.1 : 2.1),
+    glassMat,
+  );
+  cabin.position.set(0, van ? 1.25 : 1.03, van ? -0.2 : -0.4);
+  group.add(cabin);
 
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(width - 0.34, 0.12, cabinL - 0.2), bodyMat);
-  roof.position.set(0, bodyTop + cabinH + 0.06, cabin.position.z);
-  car.add(roof);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(width * 0.78, 0.12, van ? 2.8 : 1.7), paint);
+  roof.position.set(0, van ? 1.71 : 1.37, cabin.position.z);
+  group.add(roof);
 
-  const wx = width / 2 - 0.12;
-  const wz = length / 2 - 0.85;
-  for (const [px, pz] of [[-wx, wz], [wx, wz], [-wx, -wz], [wx, -wz]]) {
-    const wheel = new THREE.Mesh(wheelGeo, tyreMat);
-    wheel.position.set(px, 0.36, pz);
-    car.add(wheel);
+  for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.position.set(sx * (width / 2 - 0.12), 0.42, sz * (length / 2 - 0.85));
+    group.add(wheel);
   }
 
-  for (const s of [-1, 1]) {
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.set(s * width * 0.3, bodyTop - 0.15, length / 2 + 0.02);
-    car.add(head);
-    const tail = new THREE.Mesh(tailGeo, tailMat);
-    tail.position.set(s * width * 0.3, bodyTop - 0.12, -length / 2 - 0.02);
-    car.add(tail);
+  // White headlights at the nose, red tail lights at the rear.
+  for (const sx of [-1, 1]) {
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.08), headMat);
+    head.position.set(sx * (width / 2 - 0.32), 0.62, length / 2 + 0.02);
+    group.add(head);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.08), tailMat);
+    tail.position.set(sx * (width / 2 - 0.32), 0.62, -length / 2 - 0.02);
+    group.add(tail);
   }
 
   if (kind === 'cruiser') {
-    const barBlue = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.34), new THREE.MeshBasicMaterial({ color: 0x2f66ff, transparent: true, opacity: 1 }));
-    barBlue.position.set(-0.34, roof.position.y + 0.18, 0);
-    const barRed = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.34), new THREE.MeshBasicMaterial({ color: 0xff2e4d, transparent: true, opacity: 0.15 }));
-    barRed.position.set(0.34, roof.position.y + 0.18, 0);
-    car.add(barBlue, barRed);
-    car.userData.lightBar = barBlue;
-    car.userData.lightBarRed = barRed;
+    // The emergency light bar: blue on the left, red on the right.
+    const barBlue = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.17, 0.32), barBlueMat);
+    barBlue.position.set(-0.31, 1.5, cabin.position.z);
+    group.add(barBlue);
+    const barRed = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.17, 0.32), barRedMat);
+    barRed.position.set(0.31, 1.5, cabin.position.z);
+    group.add(barRed);
+    group.userData.lightBar = barBlue;
+    group.userData.lightBarRed = barRed;
   }
 
-  car.userData.drive = { speed: 0, heading: 0, steer: 0, kind, length, width };
-  return car;
+  group.userData.drive = { speed: 0, heading: 0, steer: 0, kind, length, width };
+  return group;
 }
 
+// Push a circle at (nx, nz) out of every axis-aligned box, along the nearest face.
 export function resolveBox(x, z, nx, nz, colliders, radius) {
   let px = nx;
   let pz = nz;
   let moved = false;
-  for (const c of colliders) {
-    const hw = c.w / 2 + radius;
-    const hd = c.d / 2 + radius;
-    const dx = px - c.x;
-    const dz = pz - c.z;
+  for (const box of colliders) {
+    const hw = box.w / 2 + radius + 0.001;
+    const hd = box.d / 2 + radius + 0.001;
+    const dx = px - box.x;
+    const dz = pz - box.z;
     if (Math.abs(dx) >= hw || Math.abs(dz) >= hd) continue;
-    const ox = hw - Math.abs(dx);
-    const oz = hd - Math.abs(dz);
-    if (dx === 0 && dz === 0) {
-      const mdx = nx - x;
-      const mdz = nz - z;
-      if (Math.abs(mdx) >= Math.abs(mdz)) px = c.x + (mdx >= 0 ? hw : -hw);
-      else pz = c.z + (mdz >= 0 ? hd : -hd);
-    } else if (ox <= oz) {
-      px = c.x + (dx >= 0 ? hw : -hw);
-    } else {
-      pz = c.z + (dz >= 0 ? hd : -hd);
-    }
+    // Inside the expanded box: exit along the shallowest axis.
+    const pushX = hw - Math.abs(dx);
+    const pushZ = hd - Math.abs(dz);
+    if (pushX < pushZ) px = box.x + (dx >= 0 ? 1 : -1) * hw;
+    else pz = box.z + (dz >= 0 ? 1 : -1) * hd;
     moved = true;
   }
   return { x: px, z: pz, moved };
 }
 
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// One arcade driving step. input: { throttle, steer, handbrake }; others: cars to slide off.
 export function driveCar(car, input, dt, colliders, others = []) {
-  const d = car.userData.drive;
-  const C = CONFIG.car;
+  const drive = car.userData.drive;
   const throttle = input.throttle || 0;
-  const steer = input.steer || 0;
-  const handbrake = Boolean(input.handbrake);
 
-  if (handbrake) {
-    d.speed -= d.speed * Math.min(1, 3.4 * dt);
-  } else if (throttle > 0) {
-    d.speed += C.accel * throttle * dt;
-    if (d.speed > C.topSpeed) d.speed = C.topSpeed;
+  // Longitudinal: throttle, brake-then-reverse, coast, handbrake.
+  if (throttle > 0) {
+    drive.speed = Math.min(CONFIG.car.topSpeed, drive.speed + CONFIG.car.accel * dt);
   } else if (throttle < 0) {
-    if (d.speed > 0.4) {
-      d.speed -= C.brake * dt;
-      if (d.speed < 0) d.speed = 0;
-    } else {
-      d.speed -= C.accel * 0.55 * dt;
-      if (d.speed < -C.reverseSpeed) d.speed = -C.reverseSpeed;
-    }
+    if (drive.speed > 0) drive.speed = Math.max(0, drive.speed - CONFIG.car.brake * dt);
+    else drive.speed = Math.max(-CONFIG.car.reverseSpeed, drive.speed - CONFIG.car.accel * 0.55 * dt);
   } else {
-    d.speed -= d.speed * Math.min(1, 0.7 * dt);
-    if (Math.abs(d.speed) < 0.06) d.speed = 0;
+    const decay = 7 * dt;
+    drive.speed = drive.speed > 0
+      ? Math.max(0, drive.speed - decay)
+      : Math.min(0, drive.speed + decay);
+  }
+  if (input.handbrake) {
+    const decay = 26 * dt;
+    drive.speed = drive.speed > 0
+      ? Math.max(0, drive.speed - decay)
+      : Math.min(0, drive.speed + decay);
   }
 
-  d.steer = steer;
-  const speedFactor = Math.min(1, Math.abs(d.speed) / 9);
-  d.heading += steer * C.steer * dt * speedFactor * (d.speed < 0 ? -1 : 1);
+  // Steering turns heading, scaled by speed and reversed when backing up.
+  const steerInput = input.steer || 0;
+  const speedFactor = Math.min(1, Math.abs(drive.speed) / 12);
+  drive.heading += steerInput * CONFIG.car.steer * speedFactor * dt * (drive.speed < 0 ? -1 : 1);
+  drive.steer = steerInput;
 
-  const x = car.position.x;
-  const z = car.position.z;
-  const nx = x + Math.sin(d.heading) * d.speed * dt;
-  const nz = z + Math.cos(d.heading) * d.speed * dt;
-  const res = resolveBox(x, z, nx, nz, colliders, 1.05);
-  if (res.moved) d.speed *= 0.35;
-  car.position.x = res.x;
-  car.position.z = res.z;
+  // Advance nose-first, then resolve buildings, then slide off neighbouring cars.
+  const nx = car.position.x + Math.sin(drive.heading) * drive.speed * dt;
+  const nz = car.position.z + Math.cos(drive.heading) * drive.speed * dt;
+  const res = resolveBox(car.position.x, car.position.z, nx, nz, colliders, drive.length * 0.38);
+  let px = res.x;
+  let pz = res.z;
+  if (res.moved) drive.speed *= 0.45; // scraping a wall costs momentum
 
-  for (const o of others) {
-    if (!o || o === car || !o.userData || !o.userData.drive) continue;
-    const dx = car.position.x - o.position.x;
-    const dz = car.position.z - o.position.z;
-    const dist = Math.hypot(dx, dz);
-    const minDist = 3.6;
-    if (dist > 0.0001 && dist < minDist) {
-      const push = ((minDist - dist) / dist) * 0.5;
-      car.position.x += dx * push;
-      car.position.z += dz * push;
-      o.position.x -= dx * push * 0.5;
-      o.position.z -= dz * push * 0.5;
-    }
+  for (const other of others) {
+    if (!other || other === car) continue;
+    const od = other.userData.drive;
+    if (!od) continue;
+    const ox = px - other.position.x;
+    const oz = pz - other.position.z;
+    const minSep = (drive.length + od.length) * 0.31;
+    const d2 = ox * ox + oz * oz;
+    if (d2 > minSep * minSep || d2 < 1e-6) continue;
+    const d = Math.sqrt(d2);
+    const push = (minSep - d) * 0.5;
+    px += (ox / d) * push;
+    pz += (oz / d) * push;
   }
 
-  car.rotation.y = d.heading;
+  car.position.x = px;
+  car.position.z = pz;
+  car.position.y = groundHeight(px, pz);
+  car.rotation.y = drive.heading;
   return { moved: res.moved };
 }

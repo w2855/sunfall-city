@@ -1,19 +1,17 @@
-// Sunfall City — the wiring. Renderer and night scene, the built city, the walker and the
-// player state, ambient traffic and pedestrians, police heat, the five-step story, input,
-// a lerped chase camera, synthesized engine and siren, a two-second localStorage save, the
-// WASTED respawn at the dock, and window.__sunfall for the maker to pose screenshots.
+// Sunfall City: the wiring. Renderer, city, traffic, heat, missions, sound, save.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
-import { buildCity, network } from './world.js';
-import { makeCar, driveCar } from './vehicles.js';
+import { buildCity, CITY_HALF, network, randomRoadPoint } from './world.js';
+import { makeCar, driveCar, resolveBox } from './vehicles.js';
 import { makeAvatar, createPlayerState, stepOnFoot, nearestCar } from './player.js';
 import { spawnTraffic, stepTraffic, spawnPedestrians, stepPedestrians } from './traffic.js';
 import { addCrime, coolHeat, maintainPolice, stepPolice, nearestCop } from './police.js';
 import { createMissionRunner } from './missions.js';
-import { initHud, toast, banner, updateHud, cacheMinimapGrid } from './hud.js';
+import { initHud, toast, banner, setObjective, updateHud, cacheMinimapGrid } from './hud.js';
 import { initAudio, setEngine, siren, gunshot, thud } from './audio.js';
 
-// ---- renderer and night scene -------------------------------------------------
+// ---------------------------------------------------------------- renderer, scene, lights
+
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -21,236 +19,405 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(CONFIG.colors.sky);
-scene.fog = new THREE.Fog(CONFIG.colors.fog, 110, 520);
+scene.fog = new THREE.Fog(CONFIG.colors.fog, 70, 460);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
+camera.position.set(37, 6, 20);
 
-scene.add(new THREE.HemisphereLight(0x8a86c9, 0x241d38, 0.85)); // purple sky over dark ground
-const moon = new THREE.DirectionalLight(0xc3caff, 0.7);          // the moon
-moon.position.set(-140, 200, -80);
+scene.add(new THREE.HemisphereLight(0x8a7fb8, 0x2a2440, 0.9));
+const moon = new THREE.DirectionalLight(0xbfb8e8, 1.0);
+moon.position.set(180, 260, -140);
 scene.add(moon);
-const fill = new THREE.DirectionalLight(0x3a5fd9, 0.35);         // blue bounce off the streets
-fill.position.set(110, 80, 140);
+const fill = new THREE.DirectionalLight(0x4a5fd0, 0.4);
+fill.position.set(-160, 120, 180);
 scene.add(fill);
 
-// ---- world and actors -----------------------------------------------------------
-buildCity(scene);
-cacheMinimapGrid(network.lines);
-const worldHalf = (CONFIG.city.blocks * CONFIG.city.block) / 2;
+// ---------------------------------------------------------------- the world
 
-const SPAWN = new THREE.Vector3(0, 0, worldHalf - 4); // on the southern ring road
-const DOCK = { x: 30, z: worldHalf + 26 }; // on the sand, where the wasted wake up
+buildCity(scene);
+
+// Spawn at the downtown crossing of Fifth and Meridian (a real grid line each way).
+const SPAWN = { x: 37, z: 37 };
+const DOCK = { x: -111, z: CITY_HALF + 16 }; // the south dock, on the sand
 
 const avatar = makeAvatar();
 scene.add(avatar);
-const state = createPlayerState(SPAWN);
+const state = createPlayerState({ ...SPAWN, heading: 0 });
 avatar.position.set(state.pos.x, 0, state.pos.z);
-avatar.rotation.y = state.heading;
 
+// ---------------------------------------------------------------- actors
+
+const lane = (sign) => sign * CONFIG.city.road * 0.25;
 const cars = spawnTraffic(scene, 26);
-
-// One parked car near the spawn, nose along the kerb.
-const parked = makeCar(0xe0e4ea, 'sedan');
-parked.position.set(8, 0, worldHalf - 5);
-parked.userData.drive.heading = Math.PI / 2;
-parked.userData.parked = true;
-parked.rotation.y = Math.PI / 2;
-scene.add(parked);
-cars.push(parked);
+const parkedCar = makeCar(CONFIG.colors.cars[3], 'sedan');
+parkedCar.position.set(SPAWN.x + 9, 0, SPAWN.z + lane(1));
+parkedCar.userData.drive.heading = Math.PI / 2;
+scene.add(parkedCar);
+cars.push(parkedCar);
 
 const peds = spawnPedestrians(scene, 42);
 const cops = [];
-state.cars = cars; // the cruisers shove this traffic aside as they close in
+
+const missions = createMissionRunner(scene, CITY_HALF);
+
+// ---------------------------------------------------------------- hud + save
 
 initHud();
-const missions = createMissionRunner(scene, worldHalf);
+cacheMinimapGrid(network.lines);
+missions.setObjective();
 
-// ---- input ------------------------------------------------------------------------
-const keys = new Set();
-let camBearing = Math.PI; // facing north, into the city
-let started = false;
-let paused = false;
-let bumpCd = 0;
-let wastedTimer = 0;
-
-const menu = document.getElementById('menu');
-document.getElementById('enter').addEventListener('click', () => {
-  if (started) return;
-  started = true;
-  menu.classList.add('hidden');
-  initAudio();
-  banner('WELCOME TO SUNFALL CITY', 3);
-  toast('FOLLOW THE LIGHT COLUMN · YOUR RIDE IS BY THE KERB');
-});
-
-function onStar(n) {
-  banner(`WANTED · ${n} STAR${n > 1 ? 'S' : ''}`, 1.8);
+const SAVE_KEY = 'sunfall-city-v1';
+try {
+  const save = JSON.parse(window.localStorage.getItem(SAVE_KEY) ?? 'null');
+  if (save && typeof save === 'object') {
+    if (Number.isFinite(save.money)) state.money = Math.max(0, Math.floor(save.money));
+    if (Number.isFinite(save.deliveries)) state.deliveries = Math.max(0, Math.floor(save.deliveries));
+  }
+} catch {
+  /* a broken save is no save */
+}
+let saveTimer = 0;
+function saveGame() {
+  try {
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify({ money: state.money, deliveries: state.deliveries }));
+  } catch {
+    /* storage may be unavailable; the game plays on */
+  }
 }
 
-function tryEnterExit() {
-  if (!state.alive) return;
-  if (state.car) {
-    exitCar();
-    return;
-  }
-  const car = nearestCar(state, cars, 3.8);
-  if (!car) return;
+// ---------------------------------------------------------------- input
+
+const keys = new Set();
+let started = false;
+let paused = false;
+let cameraBearing = 0;
+let mouseBearing = 0;
+
+const menu = document.getElementById('menu');
+const enterButton = document.getElementById('enter');
+
+// A crosshair the gun aims down.
+const crosshair = document.createElement('div');
+crosshair.textContent = '+';
+Object.assign(crosshair.style, {
+  position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -54%)',
+  fontSize: '26px', color: '#ffd166', textShadow: '0 0 8px rgba(0,0,0,0.9)',
+  display: 'none',
+});
+document.getElementById('hud').appendChild(crosshair);
+
+function syncCrosshair() {
+  crosshair.style.display = state.armed && !state.car && state.alive ? 'block' : 'none';
+}
+
+function onStar(stars) {
+  toast(`WANTED — ${'\u2605'.repeat(stars)}`);
+}
+
+function arm(v) {
+  if (state.car) return; // no shooting from inside the car
+  state.armed = typeof v === 'boolean' ? v : !state.armed;
+  syncCrosshair();
+}
+
+function enterCar(car) {
   state.car = car;
   state.onFoot = false;
   avatar.visible = false;
-  if (!car.userData.stolen) {
-    car.userData.stolen = true;
-    car.userData.parked = false;
-    if (!car.userData.ai) car.userData.ai = { cruise: 10, turnIn: 8, turning: 0, stuck: 0 };
-    addCrime(state, CONFIG.wanted.crimePoints.stealCar, onStar); // stealing it draws heat
-    toast('CAR STOLEN — THE CITY NOTICED');
-  }
+  arm(false);
+  state.pos.set(car.position.x, 0, car.position.z);
+  const drive = car.userData.drive;
+  state.heading = drive.heading;
+  mouseBearing = drive.heading;
+  cameraBearing = drive.heading;
+}
+
+function tryEnterNearestCar() {
+  const car = nearestCar(state, cars, 3.6);
+  if (!car) return;
+  enterCar(car);
+  addCrime(state, CONFIG.wanted.crimePoints.stealCar, onStar);
+  toast(car === parkedCar ? 'That one was parked. The owner saw everything.' : 'Car borrowed. Nobody asked.');
 }
 
 function exitCar() {
   const car = state.car;
   if (!car) return;
-  const d = car.userData.drive;
-  // Step out on the left of the car, clear of the body.
-  const lx = Math.cos(d.heading);
-  const lz = -Math.sin(d.heading);
-  state.pos.x = car.position.x + lx * 2.6;
-  state.pos.z = car.position.z + lz * 2.6;
   state.car = null;
   state.onFoot = true;
   avatar.visible = true;
-  avatar.position.set(state.pos.x, 0, state.pos.z);
-  if (car.userData.ai) car.userData.ai.cruise = 0; // a dumped car stays dumped
+  // Step out on the left, pushed out of any building.
+  let sx = car.position.x - Math.cos(car.userData.drive.heading) * 2.2;
+  let sz = car.position.z + Math.sin(car.userData.drive.heading) * 2.2;
+  const res = resolveBox(car.position.x, car.position.z, sx, sz, network.colliders, CONFIG.player.radius);
+  state.pos.set(res.x, 0, res.z);
+  state.heading = car.userData.drive.heading;
+  mouseBearing = state.heading;
+  cameraBearing = state.heading;
+  syncCrosshair();
 }
 
-function toggleArm() {
-  state.armed = !state.armed;
-  toast(state.armed ? 'PISTOL DRAWN' : 'PISTOL HOLSTERED');
-}
-
-// A click fires a ray from the crosshair; the closest pedestrian along it, inside 60 m, dies.
-function shoot() {
-  if (!state.armed || !state.alive) return;
-  gunshot();
-
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const origin = camera.position;
-  let target = null;
-  let bestT = 60;
-  for (const ped of peds) {
-    const p = ped.userData.ped;
-    if (!p || p.down > 0) continue;
-    const vx = ped.position.x - origin.x;
-    const vy = ped.position.y + 1 - origin.y;
-    const vz = ped.position.z - origin.z;
-    const t = vx * dir.x + vy * dir.y + vz * dir.z;
-    if (t < 2 || t > bestT) continue;
-    const ox = vx - dir.x * t;
-    const oy = vy - dir.y * t;
-    const oz = vz - dir.z * t;
-    if (Math.hypot(ox, oy, oz) < 1.4) {
-      bestT = t;
-      target = ped;
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {
+    if (started) {
+      paused = !paused;
+      toast(paused ? 'PAUSED — Esc to resume' : 'Back on the street.');
     }
+    return;
   }
-  if (target) {
-    target.userData.ped.down = 20;
-    target.rotation.x = Math.PI / 2;
-    target.position.y = 0.28;
-    thud();
-    state.money += 40;
-    addCrime(state, CONFIG.wanted.crimePoints.hitPedestrian, onStar); // a kill is three stars of heat
-    toast('+$40 · THE STREET WENT QUIET');
-  } else {
-    addCrime(state, CONFIG.wanted.crimePoints.shootNear, onStar); // firing in public draws its own heat
-  }
-}
-
-addEventListener('keydown', (e) => {
   keys.add(e.code);
-  if (!started) return;
-  if (e.code === 'Escape' && !e.repeat) {
-    paused = !paused;
-    banner(paused ? 'PAUSED — ESC RESUMES' : 'BACK ON THE STREET', 1.6);
+  if (!started || paused || !state.alive) return;
+  if (e.code === 'KeyE') {
+    if (state.car) exitCar();
+    else tryEnterNearestCar();
   }
-  if (paused) return;
-  if (e.code === 'KeyE' && !e.repeat) tryEnterExit();
-  if (e.code === 'KeyQ' && !e.repeat) toggleArm();
-  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'KeyQ') arm();
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('mousemove', (e) => {
+window.addEventListener('keyup', (e) => keys.delete(e.code));
+
+window.addEventListener('mousemove', (e) => {
   if (!started || paused) return;
-  camBearing -= e.movementX * 0.0026;
-  camBearing = Math.atan2(Math.sin(camBearing), Math.cos(camBearing));
-});
-addEventListener('mousedown', () => {
-  if (started && !paused) shoot();
+  mouseBearing -= (e.movementX || 0) * 0.0026;
 });
 
-// ---- damage, death and the dock ----------------------------------------------------
-function onBumpPlayer() {
-  if (bumpCd > 0 || !state.alive) return;
-  bumpCd = 0.9;
-  state.health = Math.max(0, state.health - (state.car ? 8 : 14));
-  thud();
-  if (state.car) state.car.userData.drive.speed *= 0.5;
+// Shooting: a ray from the crosshair, up to 60 metres, one pedestrian at a time.
+const raycaster = new THREE.Raycaster();
+const rayVector = new THREE.Vector3(0, 0, 0);
+const rayTmp = new THREE.Vector3();
+
+window.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || !started || paused || !state.alive) return;
+  if (!state.armed || state.car) return;
+  gunshot();
+  raycaster.setFromCamera(rayVector, camera);
+  const ray = raycaster.ray;
+  let best = null;
+  let bestAlong = 60;
+  for (const ped of peds) {
+    if (ped.userData.ped.dead) continue;
+    rayTmp.copy(ped.position);
+    rayTmp.y += 1.0;
+    rayTmp.sub(ray.origin);
+    const along = rayTmp.dot(ray.direction);
+    if (along <= 0 || along >= 60) continue;
+    const perp2 = rayTmp.lengthSq() - along * along;
+    if (perp2 > 2.56) continue; // 1.6 m off the line
+    if (along < bestAlong) {
+      bestAlong = along;
+      best = ped;
+    }
+  }
+  if (!best) return;
+  killPed(best);
+  state.money += 40;
+  addCrime(state, 3, onStar);
+  toast('MURDER — $40 found on the body. Heat surging.');
+});
+
+function killPed(ped) {
+  const pd = ped.userData.ped;
+  pd.dead = true;
+  ped.rotation.x = Math.PI / 2;
+  ped.position.y = groundHeight(ped.position.x, ped.position.z) + 0.15;
 }
 
-// Knocking a pedestrian down with the car is a crime: hard at speed, a bump when slow.
-function carPedBumps() {
-  if (!state.car) return;
+// The menu's only job: open the city.
+enterButton.addEventListener('click', () => {
+  if (started) return;
+  started = true;
+  menu.classList.add('hidden');
+  initAudio();
+  banner('SUNFALL CITY', 2.5);
+  toast('A payphone is ringing downtown — follow the light.');
+});
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// ---------------------------------------------------------------- crime interactions
+
+let lastBump = 0;
+function onBumpPlayer(speed) {
+  const now = clock;
+  if (now - lastBump < 0.6) return;
+  lastBump = now;
+  state.health -= 8 + speed * 0.45;
+  thud();
+  toast('Rammed by a cruiser!');
+}
+
+let lastCrashSound = 0;
+let lastPedBump = 0;
+
+function carInteractions(dt) {
   const car = state.car;
-  const speed = Math.abs(car.userData.drive.speed);
-  if (speed < 3) return;
+  if (!car) return;
+  const drive = car.userData.drive;
+  const speed = Math.abs(drive.speed);
+
   for (const ped of peds) {
-    const p = ped.userData.ped;
-    if (!p || p.down > 0) continue;
-    if (Math.hypot(ped.position.x - car.position.x, ped.position.z - car.position.z) < 2.6) {
-      p.down = 20;
-      ped.rotation.x = Math.PI / 2;
-      ped.position.y = 0.28;
+    const pd = ped.userData.ped;
+    if (pd.dead) continue;
+    const dx = ped.position.x - car.position.x;
+    const dz = ped.position.z - car.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > drive.length * 0.5 + 0.9) continue;
+    if (speed > 6) {
+      // Knocked down: a proper crime.
+      killPed(ped);
+      addCrime(state, CONFIG.wanted.crimePoints.hitPedestrian, onStar);
       thud();
-      car.userData.drive.speed *= 0.75;
-      addCrime(state, speed > 6 ? CONFIG.wanted.crimePoints.hitPedestrian : CONFIG.wanted.crimePoints.bumpPedestrian, onStar);
+      toast('You hit a pedestrian!');
+    } else if (speed > 1.5 && clock > lastPedBump + 2) {
+      // A shove: they scatter and the city remembers.
+      lastPedBump = clock;
+      pd.scareUntil = clock + 3;
+      pd.dir = Math.atan2(dx, dz);
+      addCrime(state, CONFIG.wanted.crimePoints.bumpPedestrian, onStar);
     }
   }
 }
 
-function respawnAtDock() {
+// ---------------------------------------------------------------- wasted + respawn
+
+let deathTimer = 0;
+function respawn() {
   state.alive = true;
   state.health = 100;
-  state.money = Math.floor(state.money / 2); // the hospital takes half
+  state.money = Math.floor(state.money / 2);
   state.wanted = 0;
   state.wantedHeat = 0;
-  state.car = null;
-  state.onFoot = true;
+  if (state.car) exitCar();
+  state.pos.set(DOCK.x, 0, DOCK.z);
+  state.heading = Math.PI; // facing back into the city
+  arm(false);
   avatar.visible = true;
-  state.pos.x = DOCK.x;
-  state.pos.z = DOCK.z;
-  avatar.position.set(state.pos.x, 0, state.pos.z);
-  camera.position.set(state.pos.x - 6, 4, state.pos.z - 9);
-  toast('YOU CAME TO ON THE DOCK · HALF YOUR CASH IS GONE');
+  toast('You wake up at the south dock — half your cash is gone.');
+  saveGame();
 }
 
-// ---- the save in your browser --------------------------------------------------------
-const SAVE_KEY = 'sunfall-save';
-function saveGame() {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ money: state.money, deliveries: state.deliveries }));
-  } catch (err) { /* private mode: the run just does not persist */ }
-}
-try {
-  const raw = localStorage.getItem(SAVE_KEY);
-  if (raw) {
-    const s = JSON.parse(raw);
-    if (typeof s.money === 'number') state.money = s.money;
-    if (typeof s.deliveries === 'number') state.deliveries = s.deliveries;
+// ---------------------------------------------------------------- the loop
+
+const camEye = new THREE.Vector3();
+const camLook = new THREE.Vector3();
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+let clock = 0;
+let last = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  if (started && !paused) {
+    clock += dt;
+
+    // The nearest cruiser matters whether you're alive, dying or respawned.
+    const copInfo = nearestCop(cops, state);
+
+    if (state.alive) {
+      // The player's own movement.
+      if (state.car) {
+        const input = {
+          throttle: (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0),
+          steer: (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0),
+          handbrake: keys.has('ShiftLeft') || keys.has('ShiftRight'),
+        };
+        const speedBefore = state.car.userData.drive.speed;
+        const res = driveCar(state.car, input, dt, network.colliders, cars);
+        if (res.moved && Math.abs(speedBefore) > 8 && clock - lastCrashSound > 0.4) {
+          lastCrashSound = clock;
+          thud();
+        }
+        state.pos.set(state.car.position.x, 0, state.car.position.z);
+        state.heading = state.car.userData.drive.heading;
+      } else {
+        stepOnFoot(state, avatar, {
+          moveZ: (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0),
+          moveX: (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0),
+          sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'),
+        }, dt, network.colliders, cameraBearing);
+      }
+
+      // The city, living.
+      stepTraffic(cars, dt, state);
+      stepPedestrians(peds, dt, state, clock);
+      maintainPolice(scene, cops, state, CITY_HALF);
+      stepPolice(cops, dt, state, onBumpPlayer);
+      carInteractions(dt);
+      coolHeat(state, dt, copInfo ? copInfo.dist : null);
+      missions.step(state, dt);
+
+      // Death by cop.
+      if (state.health <= 0) {
+        state.alive = false;
+        state.health = 0;
+        deathTimer = 2.4;
+        banner('WASTED', 3.4);
+        if (state.car) exitCar();
+        avatar.rotation.x = Math.PI / 2; // down on the pavement
+      }
+    } else {
+      deathTimer -= dt;
+      if (deathTimer <= 0) {
+        avatar.rotation.x = 0;
+        respawn();
+      }
+    }
+
+    // The engine hum and the wail, tracking the moment.
+    if (state.car) {
+      const revs = Math.min(1, Math.abs(state.car.userData.drive.speed) / CONFIG.car.topSpeed);
+      setEngine(0.15 + revs * 0.85, true);
+    } else {
+      setEngine(0.12, false);
+    }
+    siren(state.wanted > 0, copInfo ? Math.max(0, Math.min(1, 1 - copInfo.dist / 130)) : 0);
+
+    // Pocket the save every two seconds.
+    saveTimer += dt;
+    if (saveTimer >= 2) {
+      saveTimer = 0;
+      saveGame();
+    }
   }
-} catch (err) { /* a broken save is a fresh start */ }
 
-// ---- the maker's debug hook ------------------------------------------------------------
+  // The chase camera, always lerped, behind the car or the walker.
+  if (state.car) {
+    const h = state.car.userData.drive.heading;
+    camEye.set(
+      state.car.position.x - Math.sin(h) * 9.5,
+      5.4,
+      state.car.position.z - Math.cos(h) * 9.5,
+    );
+    camLook.set(
+      state.car.position.x + Math.sin(h) * 4,
+      1.8,
+      state.car.position.z + Math.cos(h) * 4,
+    );
+    cameraBearing += wrapAngle(h - cameraBearing) * 0.08;
+  } else {
+    camEye.set(
+      state.pos.x - Math.sin(cameraBearing) * 7.5,
+      state.pos.y + 5,
+      state.pos.z - Math.cos(cameraBearing) * 7.5,
+    );
+    camLook.set(state.pos.x, state.pos.y + 1.6, state.pos.z);
+  }
+  camera.position.lerp(camEye, Math.min(1, dt * 5));
+  camera.lookAt(camLook);
+
+  updateHud(state, cops, peds, CITY_HALF, [missions.blip()]);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+
+// ---------------------------------------------------------------- the maker's hooks
+
 window.__sunfall = {
   state,
   avatar,
@@ -260,130 +427,28 @@ window.__sunfall = {
   peds,
   missions,
   place(x, z) {
-    state.pos.x = Number(x) || 0;
-    state.pos.z = Number(z) || 0;
-    if (state.car) {
-      state.car.position.x = state.pos.x;
-      state.car.position.z = state.pos.z;
-    }
-    avatar.position.set(state.pos.x, 0, state.pos.z);
+    if (state.car) exitCar();
+    state.pos.set(Number(x) || 0, 0, Number(z) || 0);
   },
-  giveCar(color = 0xffd166) {
-    const car = makeCar(color, 'sedan');
-    car.position.set(state.pos.x + 3.5, 0, state.pos.z + 2);
-    car.userData.ai = { cruise: 10, turnIn: 8, turning: 0, stuck: 0 };
+  giveCar(color) {
+    const car = makeCar(Number(color) || CONFIG.colors.cars[1], 'sedan');
+    car.position.set(state.pos.x + 4, 0, state.pos.z);
+    car.userData.drive.heading = state.heading;
     scene.add(car);
     cars.push(car);
-    state.car = car;
-    state.onFoot = false;
-    avatar.visible = false;
+    enterCar(car);
     return car;
   },
-  exitCar: () => exitCar(),
-  arm(on = true) {
-    state.armed = Boolean(on);
+  exitCar,
+  arm(v) {
+    if (state.car) return;
+    state.armed = typeof v === 'boolean' ? v : !state.armed;
+    syncCrosshair();
   },
-  heat(n = 2) {
-    addCrime(state, n, onStar);
+  heat(n) {
+    addCrime(state, Number(n) || 1, onStar);
   },
-  money(n = 1000) {
-    state.money += n;
+  money(n) {
+    state.money = Number.isFinite(Number(n)) ? Math.floor(Number(n)) : state.money + 100;
   },
 };
-
-// ---- the chase camera --------------------------------------------------------------------
-const camGoal = new THREE.Vector3();
-const camLook = new THREE.Vector3();
-camera.position.set(SPAWN.x, 3.4, SPAWN.z - 7);
-
-function updateCamera(dt) {
-  if (state.car) {
-    const d = state.car.userData.drive;
-    const fx = Math.sin(d.heading);
-    const fz = Math.cos(d.heading);
-    camGoal.set(state.car.position.x - fx * 9.5, 4.6, state.car.position.z - fz * 9.5);
-    camLook.set(state.car.position.x + fx * 7, 1.4, state.car.position.z + fz * 7);
-  } else {
-    const fx = Math.sin(camBearing);
-    const fz = Math.cos(camBearing);
-    camGoal.set(state.pos.x - fx * 6.2, 3.4, state.pos.z - fz * 6.2);
-    camLook.set(state.pos.x + fx * 5, 1.5, state.pos.z + fz * 5);
-  }
-  const k = 1 - Math.exp(-dt * 5.5);
-  camera.position.lerp(camGoal, k);
-  camera.lookAt(camLook);
-}
-
-addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ---- the loop ------------------------------------------------------------------------------
-const clock = new THREE.Clock();
-let saveT = 0;
-
-function tick() {
-  requestAnimationFrame(tick);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  bumpCd = Math.max(0, bumpCd - dt);
-
-  if (started && !paused) {
-    if (state.alive) {
-      // The player: driving or walking.
-      if (state.car) {
-        const input = {
-          throttle: (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0),
-          steer: (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0),
-          handbrake: keys.has('ShiftLeft') || keys.has('ShiftRight'),
-        };
-        driveCar(state.car, input, dt, network.colliders, cars.concat(cops));
-        state.pos.x = state.car.position.x;
-        state.pos.z = state.car.position.z;
-      } else {
-        stepOnFoot(state, avatar, keys, dt, network.colliders, camBearing);
-      }
-
-      // The city, the heat and the story.
-      stepTraffic(cars, dt, state);
-      stepPedestrians(peds, dt, state);
-      maintainPolice(scene, cops, state, worldHalf);
-      stepPolice(cops, dt, state, onBumpPlayer);
-      const copDist = nearestCop(cops, state);
-      coolHeat(state, dt, copDist);
-      missions.step(state, dt);
-      carPedBumps();
-
-      // Engine tracks the revs; the siren wails while the heat rides along.
-      const revs = state.car ? Math.abs(state.car.userData.drive.speed) / CONFIG.car.topSpeed : 0;
-      setEngine(0.25 + revs * 0.75, Boolean(state.car));
-      siren(cops.length > 0, copDist < 55);
-
-      // The save: money and deliveries, every two seconds.
-      saveT += dt;
-      if (saveT >= 2) {
-        saveT = 0;
-        saveGame();
-      }
-    } else {
-      // Wasted: hold on the banner, then wake up at the dock.
-      wastedTimer -= dt;
-      if (wastedTimer <= 0) respawnAtDock();
-      setEngine(0, false);
-      siren(false, false);
-    }
-
-    if (state.alive && state.health <= 0) {
-      state.alive = false;
-      wastedTimer = 3;
-      if (state.car && state.car.userData.ai) state.car.userData.ai.cruise = 0;
-      banner('WASTED', 4);
-    }
-  }
-
-  updateCamera(dt);
-  updateHud(state, cops, peds, worldHalf, [missions.blip()]);
-  renderer.render(scene, camera);
-}
-tick();

@@ -1,65 +1,100 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sunfall City</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; background: #0d0b1a; overflow: hidden; }
-  canvas#game { display: block; width: 100vw; height: 100vh; }
-  #menu {
-    position: fixed; inset: 0; z-index: 20;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 18px; text-align: center;
-    background: linear-gradient(180deg, rgba(13,10,26,0.97) 0%, rgba(32,22,56,0.94) 55%, rgba(13,10,26,0.97) 100%);
-    color: #eceaf6;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    transition: opacity 0.5s ease;
-  }
-  #menu.hidden { opacity: 0; pointer-events: none; }
-  .title {
+  html, body {
     margin: 0;
-    font-size: clamp(44px, 9vw, 92px);
+    height: 100%;
+    overflow: hidden;
+    background: #0d0a18;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  canvas#game {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  #hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    color: #e8e6f2;
+    user-select: none;
+  }
+  #menu {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    text-align: center;
+    background: linear-gradient(165deg, rgba(26, 22, 51, 0.94), rgba(13, 10, 24, 0.97));
+  }
+  #menu.hidden { display: none; }
+  #menu h1 {
+    margin: 0;
+    font-size: clamp(44px, 8vw, 92px);
     font-weight: 800;
-    letter-spacing: 12px;
+    letter-spacing: 0.14em;
     color: #ffd166;
-    text-shadow: 0 0 30px rgba(255,209,102,0.35), 0 6px 18px rgba(0,0,0,0.6);
+    text-shadow: 0 0 34px rgba(255, 209, 102, 0.35), 0 4px 0 rgba(0, 0, 0, 0.4);
   }
-  .title .pink { color: #ef476f; }
-  .tagline { margin: 0; font-size: 12px; letter-spacing: 3px; color: #b7b3cf; }
-  #enter {
-    margin-top: 10px;
-    background: #ffd166;
+  #menu h1 .pink { color: #ef476f; text-shadow: 0 0 34px rgba(239, 71, 111, 0.45); }
+  #menu .tagline {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: 0.32em;
+    color: #9a92c4;
+  }
+  #menu button {
+    pointer-events: auto;
+    margin-top: 8px;
+    padding: 15px 52px;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
     color: #1a1633;
+    background: #ffd166;
     border: none;
-    font-weight: 800;
-    font-size: 15px;
-    letter-spacing: 3px;
-    padding: 14px 44px;
-    border-radius: 999px;
+    border-radius: 4px;
     cursor: pointer;
-    box-shadow: 0 0 24px rgba(255,209,102,0.4);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    font-family: inherit;
+    box-shadow: 0 0 30px rgba(255, 209, 102, 0.35);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
   }
-  #enter:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 0 36px rgba(255,209,102,0.65); }
-  .controls {
+  #menu button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 46px rgba(255, 209, 102, 0.6);
+  }
+  #menu ul.controls {
+    margin: 10px 0 0;
+    padding: 0;
     list-style: none;
-    padding: 0; margin: 14px 0 0;
-    display: grid; grid-template-columns: repeat(3, auto);
-    gap: 8px 28px;
-    font-size: 12px; letter-spacing: 1px;
-    color: #9aa0b5;
+    font-size: 13px;
+    line-height: 2.1;
+    letter-spacing: 0.08em;
+    color: #8f87b8;
   }
-  .controls b { color: #eceaf6; }
+  #menu ul.controls b {
+    color: #d9d4f0;
+    display: inline-block;
+    min-width: 74px;
+    text-align: right;
+    margin-right: 12px;
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="hud"></div>
 <div id="menu">
-  <h1 class="title">SUNFALL <span class="pink">CITY</span></h1>
-  <p class="tagline">AN OPEN-WORLD CRIME STORY · RUNS OFFLINE · SAVES IN YOUR BROWSER</p>
+  <h1>SUNFALL <span class="pink">CITY</span></h1>
+  <p class="tagline">AN OPEN-WORLD CRIME STORY &middot; RUNS OFFLINE &middot; SAVES IN YOUR BROWSER</p>
   <button id="enter">ENTER THE CITY</button>
   <ul class="controls">
     <li><b>WASD</b> move / drive</li>

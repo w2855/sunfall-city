@@ -1,52 +1,39 @@
-# Sunfall City 🌴
+# Sunfall City
 
-[![Bounty](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![Rank](https://make.fun/badge/gta6-01/w2855/sunfall-city/rank.svg)](https://make.fun/leaderboard/gta6-01)
-[![Reward](https://make.fun/badge/gta6-01/w2855/sunfall-city/reward.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun bounty](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![rank](https://make.fun/badge/gta6-01/w2855/sunfall-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard)
+[![reward](https://make.fun/badge/gta6-01/w2855/sunfall-city/reward.svg)](https://make.fun/bounty/gta6-01/w2855/sunfall-city)
 
-**Sunfall City** is an original open-world crime story that runs entirely offline in your
-browser. You wake up in a neon-lit city of 81 dark city blocks with a beach to the south,
-stumble to a payphone, and work your way through five story jobs — from a courier run to
-the marina to a stolen-car delivery at the west-side lockup, all the way to the last ferry.
-Steal any of the 27 cars drifting and parked around town, draw some stars, lose the heat
-in the side streets, and try not to get rammed by the cruisers that spawn one per wanted
-star. Cash, health, five stars of heat, a live minimap, a synthesized engine, sirens and
-gunshots — and your money saves itself in your browser every two seconds. No network, no
-build step, no assets: three.js is vendored, every sound is WebAudio, every building is
-generated from a seeded shuffle.
+An original open-world crime story in one browser tab. You wake up in Sunfall City with $500, a
+payphone ringing downtown and five jobs between you and the last ferry out. Borrow cars that are
+not yours, run couriers through night traffic, shake the cruisers that come wailing in with every
+star on your head, and spend your evenings somewhere between the neon towers and the beach. The
+whole city runs offline in this repository — no network calls, no build step — and your cash and
+completed jobs save themselves in your browser.
 
-![Driving at night](screenshots/1-drive.png)
-![Wanted](screenshots/2-wanted.png)
-![Street scene](screenshots/3-street.png)
+![Driving through the night grid](screenshots/1-drive.png)
+![Heat: cruisers and blinking light bars](screenshots/2-wanted.png)
+![On foot in the neon streets](screenshots/3-street.png)
 
 ## Run it
 
-```sh
+```bash
 node serve.ts
 ```
 
-then open [http://localhost:8080](http://localhost:8080). That's it — the game is static
-files under `game/`.
+Then open <http://localhost:8080>. (`node main.ts` is the bounty's hand-in program: it packs
+`game/`, `screenshots/` and `dossier.json` into the output directory.)
 
 ## Controls
 
-| Key | Action |
-| --- | --- |
-| `WASD` | move / drive |
-| Mouse | look / aim |
-| `Shift` | sprint / handbrake |
-| `E` | enter / exit cars |
-| Click | shoot when armed (`Q` draws or holsters the pistol) |
-| `Esc` | pause |
+| Input | On foot | Driving |
+| --- | --- | --- |
+| WASD | move | throttle / steer |
+| Mouse | look / aim | camera |
+| Shift | sprint | handbrake |
+| E | enter the nearest car | exit |
+| Q | draw / holster pistol | — |
+| Click | shoot (when armed) | — |
+| Esc | pause | pause |
 
-## Hand in
-
-```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts
-```
-
-copies `game/` and `screenshots/` into the output directory and writes `dossier.json`
-with the make.fun game kit.
-
-Built for the [make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01) — Sunfall City,
-entry w2855.
+Five jobs, one city, and no second chances once the ferry leaves. Built for make.fun.
