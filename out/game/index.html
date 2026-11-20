@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sunfall City — an open-world crime story</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; font-family: 'Segoe UI', system-ui, sans-serif; }
+  #game { width: 100%; height: 100%; display: block; }
+  #hud { position: absolute; inset: 0; pointer-events: none; color: #f2f4f8; }
+  #menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+          background: linear-gradient(180deg, #0b0d12 40%, #1c2333 100%); color: #f2f4f8; z-index: 10; }
+  #menu h1 { font-size: 64px; letter-spacing: 6px; margin: 0; color: #ffd166; text-shadow: 0 4px 24px rgba(255,209,102,.25); }
+  #menu h1 span { color: #ef476f; }
+  #menu p.tag { color: #9aa7bd; margin: 10px 0 34px; letter-spacing: 2px; font-size: 15px; }
+  #menu button { pointer-events: auto; font: 600 17px 'Segoe UI', sans-serif; letter-spacing: 2px; color: #0b0d12; background: #ffd166;
+                 border: 0; border-radius: 10px; padding: 14px 46px; cursor: pointer; }
+  #menu button:hover { background: #ffe29a; }
+  #menu .controls { margin-top: 40px; color: #6f7d94; font-size: 13px; line-height: 1.9; text-align: center; }
+  #menu .controls b { color: #aebacd; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+<div id="menu">
+  <h1>SUNFALL <span>CITY</span></h1>
+  <p class="tag">AN OPEN-WORLD CRIME STORY · RUNS OFFLINE · SAVES IN YOUR BROWSER</p>
+  <button id="start">ENTER THE CITY</button>
+  <div class="controls">
+    <b>WASD</b> move & drive &nbsp;·&nbsp; <b>Mouse</b> look & aim &nbsp;·&nbsp; <b>Shift</b> sprint / handbrake<br>
+    <b>E</b> enter & exit cars &nbsp;·&nbsp; <b>Click</b> shoot when armed &nbsp;·&nbsp; <b>Tab</b> objectives &nbsp;·&nbsp; <b>Esc</b> pause
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
